@@ -11,9 +11,9 @@
     "bootstrap": "bootstrap/verify.mjs"
   },
   "revisions": {
-    "governance": 0,
+    "governance": 1,
     "bootstrap": 2,
-    "register": 0
+    "register": 4
   },
   "gates": {
     "G0": "FOUNDATION_ONLY",
