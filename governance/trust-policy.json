@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "model": "SALAH_OWNER_CONTROLLED_GOVERNANCE_G0",
+  "repository": {
+    "url": "https://github.com/salahshtech/SALAH-Governance.git",
+    "purpose": "Independent owner-controlled governance root for SALAH candidate evidence",
+    "authority": "OWNER_CONTROLLED_ACCESS"
+  },
+  "paths": {
+    "register": "governance/approvals.jsonl",
+    "bootstrap": "bootstrap/verify.mjs"
+  },
+  "revisions": {
+    "governance": 0,
+    "bootstrap": 2,
+    "register": 0
+  },
+  "gates": {
+    "G0": "FOUNDATION_ONLY",
+    "G1": "PENDING_VERIFIER_PINNING",
+    "G2": "PENDING_MANDATORY_ENTRYPOINT",
+    "G3": "PENDING_AMENDMENT_EXECUTION"
+  },
+  "g1VerifierPin": {
+    "schemaVersion": 1,
+    "purpose": "G1_SOURCE_VERIFIER_PIN",
+    "verifierPath": "scripts/testing/verify-phase2-notification-boundary.mjs",
+    "executionScope": "SOURCE_VERIFICATION_CLI_ONLY",
+    "allowedStates": [
+      "DRAFT",
+      "PENDING_REVIEW",
+      "FINAL_BYTES_APPROVED",
+      "ACTIVE",
+      "REJECTED",
+      "REVOKED",
+      "EXPIRED",
+      "ROLLED_BACK"
+    ],
+    "repairStatus": "REPAIR_COMPLETE",
+    "securityReviewStatus": "PASSED_WITH_NON_BLOCKING_FINDINGS",
+    "controlledOnlyPaths": [
+      "android/salah-local-notifications/build.gradle",
+      "android/salah-local-notifications/src/main/java/com/capacitorjs/plugins/localnotifications/authority/NotificationAuthority.java",
+      "android/salah-local-notifications/src/main/java/com/capacitorjs/plugins/localnotifications/authority/NotificationAuthorityBridge.java"
+    ],
+    "runtimeAuthority": false,
+    "productionAuthorized": false,
+    "rejectedVerifierSha256": "b67eb901941bf755274f6f1fe833c8ccf9d7ae1ac766841aa11db937cdbbd570"
+  },
+  "authority": {
+    "approver": "PROJECT_OWNER",
+    "localMode": "DIAGNOSTIC_ONLY",
+    "authoritativeMode": "UNAVAILABLE_UNTIL_G1_G2_G3"
+  },
+  "failClosed": [
+    "MISSING_OR_MALFORMED_POLICY",
+    "MISSING_OR_MALFORMED_REGISTER",
+    "UNSUPPORTED_VERSION",
+    "STALE_OR_REVOKED_DECISION",
+    "UNAPPROVED_CANDIDATE",
+    "UNVERIFIED_VERIFIER_OR_ENTRYPOINT",
+    "MISSING_REQUIRED_STAGE"
+  ]
+}
