@@ -3,7 +3,7 @@
   "model": "SALAH_OWNER_CONTROLLED_GOVERNANCE_G0",
   "repository": {
     "url": "https://github.com/salahshtech/SALAH-Governance.git",
-    "purpose": "Independent owner-controlled governance root for SALAH candidate evidence",
+    "purpose": "Owner-controlled governance root for SALAH candidate evidence",
     "authority": "OWNER_CONTROLLED_ACCESS"
   },
   "paths": {
@@ -11,9 +11,9 @@
     "bootstrap": "bootstrap/verify.mjs"
   },
   "revisions": {
-    "governance": 1,
-    "bootstrap": 2,
-    "register": 4
+    "governance": 2,
+    "bootstrap": 3,
+    "register": 7
   },
   "gates": {
     "G0": "FOUNDATION_ONLY",
@@ -47,10 +47,43 @@
     "productionAuthorized": false,
     "rejectedVerifierSha256": "b67eb901941bf755274f6f1fe833c8ccf9d7ae1ac766841aa11db937cdbbd570"
   },
+  "ownerRiskVerifierPin": {
+    "schemaVersion": 1,
+    "kind": "OWNER_RISK_VERIFIER_PIN",
+    "verifierPath": "scripts/testing/verify-phase2-notification-boundary.mjs",
+    "executionScope": "SOURCE_VERIFICATION_CLI_ONLY",
+    "transitionKind": "OWNER_GOVERNANCE_V2_CORRECTION",
+    "packetSha256": "8ca558b66016ab30ff658f65c61a321eb719cddcdc49b6387fbdad7d9c649857",
+    "ownerName": "SH Tech",
+    "independentReview": "UNAVAILABLE_NOT_PERFORMED",
+    "states": [
+      "DRAFT",
+      "FINAL_BYTES_APPROVED",
+      "ACTIVE",
+      "REJECTED",
+      "REVOKED",
+      "EXPIRED"
+    ],
+    "runtimeAuthority": false,
+    "productionAuthorized": false
+  },
   "authority": {
     "approver": "PROJECT_OWNER",
+    "ownerName": "SH Tech",
+    "reviewModel": "SOLE_OWNER_NO_INDEPENDENT_REVIEW",
+    "securityRiskAccepted": true,
     "localMode": "DIAGNOSTIC_ONLY",
     "authoritativeMode": "UNAVAILABLE_UNTIL_G1_G2_G3"
+  },
+  "ownerAdmission": {
+    "schemaVersion": 1,
+    "transitionKind": "OWNER_GOVERNANCE_TRANSITION",
+    "admissionKind": "OWNER_HUNK_ADMISSION",
+    "packetSha256": "8ca558b66016ab30ff658f65c61a321eb719cddcdc49b6387fbdad7d9c649857",
+    "candidateState": "CANDIDATE_SCOPE_APPROVED",
+    "admittedState": "FINAL_BYTES_APPROVED",
+    "runtimeAuthority": false,
+    "productionAuthorized": false
   },
   "failClosed": [
     "MISSING_OR_MALFORMED_POLICY",

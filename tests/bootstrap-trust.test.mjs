@@ -6,7 +6,8 @@ import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { verifyG0, verifyG1 } from '../bootstrap/verify.mjs';
+import { verifyFiniteHunkProjection, verifyOwnerAdmissionProjection, verifyOwnerTransition,
+  verifyOwnerRiskPin, verifyG0, verifyG1 } from '../bootstrap/verify.mjs';
 
 const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const originalPolicy = JSON.parse(await readFile(path.join(sourceRoot, 'governance/trust-policy.json'), 'utf8'));
@@ -206,7 +207,7 @@ async function g1Fixture({ mutateRows, mutatePolicy, unborn = false, commitAppro
   const rows = states.map((state, index) => g1Row(state, index + 1, base, expectedSha, { expiresAtUtc }));
   if (mutateRows) mutateRows(rows, { base, expectedSha });
   const policy = structuredClone(originalPolicy);
-  policy.revisions.governance = 1;
+  policy.revisions.governance = 2;
   policy.revisions.register = rows.length;
   if (mutatePolicy) mutatePolicy(policy);
   await writeFile(path.join(root, 'governance/trust-policy.json'), JSON.stringify(policy, null, 2) + '\n');
@@ -452,4 +453,340 @@ test('G1 policy cannot replace the rejected SHA or source-only scope', async () 
   } });
   await assert.rejects(policy.verify(), /G1 policy rules changed/);
   assert.equal(policy.executions, 0);
+});
+
+const OWNER_PACKET_SHA = '8ca558b66016ab30ff658f65c61a321eb719cddcdc49b6387fbdad7d9c649857';
+const OWNER_PATHS = [
+  'src/features/prayer/notifications.js',
+  'tests/unit/notification-complete-sound-contract.unit.test.js',
+  'tests/unit/phase-d2-fajr-adhan-custom-time.unit.test.js',
+  'tests/unit/prayer-notification-reliability.unit.test.js',
+  'www/app.js',
+  'www/generated/salah-prayer.js'
+];
+function ownerTransition(overrides = {}) {
+  return {
+    kind: 'OWNER_GOVERNANCE_TRANSITION', schemaVersion: 1,
+    decisionId: 'OWNER-H171-GOV-001', amendmentId: 'OWNER-H171-GOV',
+    ownerName: 'SH Tech', authority: 'SOLE_PROJECT_OWNER',
+    independentReview: 'UNAVAILABLE_NOT_PERFORMED', securityRiskAccepted: true,
+    riskStatement: 'SH Tech accepts security-sensitive change risk without independent security review.',
+    state: 'CANDIDATE_SCOPE_APPROVED', registerRevision: 1,
+    recordedAtUtc: '2026-10-12T14:35:00.000Z',
+    governanceBaseCommit: '7897d3a57d46dd282bb1628fcf83433710f48aff',
+    fromPolicyRevision: 1, toPolicyRevision: 2,
+    priorSha256ByPath: Object.fromEntries([
+      'governance/trust-policy.json', 'bootstrap/verify.mjs', 'tests/bootstrap-trust.test.mjs',
+      'governance/approvals.jsonl'].map(file => [file, file === 'governance/approvals.jsonl' ?
+        sha256(JSON.stringify(header) + '\n') : 'a'.repeat(64)])),
+    newSha256ByPath: Object.fromEntries([
+      'governance/trust-policy.json', 'bootstrap/verify.mjs', 'tests/bootstrap-trust.test.mjs'
+    ].map(file => [file, 'b'.repeat(64)])),
+    packetSha256: OWNER_PACKET_SHA, scopePaths: OWNER_PATHS,
+    sourceRecordIds: ['N-01', 'N-02', 'N-03', 'A-01', 'A-02', 'A-03', 'A-04', 'A-05', 'A-06'],
+    admissionStatus: 'NOT_ADMITTED', runtimeAuthority: false, productionAuthorized: false,
+    ...overrides
+  };
+}
+function ownerAdmission(overrides = {}) {
+  const baseline = {}, candidate = {}, hunksByPath = {};
+  const idsByPath = {
+    'src/features/prayer/notifications.js': ['N-01', 'N-02', 'N-03'],
+    'tests/unit/notification-complete-sound-contract.unit.test.js': ['T-SOUND-214-240'],
+    'tests/unit/phase-d2-fajr-adhan-custom-time.unit.test.js': ['T-FAJR-271-305'],
+    'tests/unit/prayer-notification-reliability.unit.test.js': ['T-REL-103-177', 'T-REL-291-304'],
+    'www/app.js': ['A-01', 'A-02', 'A-03', 'A-04', 'A-05', 'A-06']
+  };
+  for (const file of OWNER_PATHS) {
+    const generated = file === 'www/generated/salah-prayer.js';
+    const ids = idsByPath[file] || [];
+    baseline[file] = Buffer.from(generated ? 'OLDGEN' :
+      `start${ids.map(id => `<${id}>OLD</${id}>`).join('')}end`);
+    candidate[file] = Buffer.from(generated ? 'NEWGEN' :
+      `start${ids.map(id => `<${id}>NEW</${id}>`).join('')}end`);
+    if (!generated) hunksByPath[file] = ids.map(id => ({ id,
+      prefix: `<${id}>`, old: 'OLD', replacement: 'NEW', suffix: `</${id}>`,
+      oldSha256: sha256('OLD'), replacementSha256: sha256('NEW') }));
+  }
+  const record = {
+    kind: 'OWNER_HUNK_ADMISSION', schemaVersion: 1, decisionId: 'OWNER-H171-BYTES-001',
+    amendmentId: 'OWNER-H171-BYTES', ownerName: 'SH Tech', authority: 'SOLE_PROJECT_OWNER',
+    independentReview: 'UNAVAILABLE_NOT_PERFORMED', securityRiskAccepted: true,
+    state: 'FINAL_BYTES_APPROVED', registerRevision: 2,
+    recordedAtUtc: '2026-10-12T14:36:00.000Z', governanceRevision: 2,
+    packetSha256: OWNER_PACKET_SHA, scopePaths: OWNER_PATHS,
+    baselineSha256ByPath: Object.fromEntries(OWNER_PATHS.map(file => [file, sha256(baseline[file])])),
+    candidateSha256ByPath: Object.fromEntries(OWNER_PATHS.map(file => [file, sha256(candidate[file])])),
+    hunksByPath,
+    generated: { path: 'www/generated/salah-prayer.js', inputTreeSha256: 'c'.repeat(64),
+      generatorSha256: 'd'.repeat(64), outputSha256: sha256(candidate['www/generated/salah-prayer.js']),
+      reviewedDiffSha256: 'e'.repeat(64) },
+    runtimeAuthority: false, productionAuthorized: false, ...overrides
+  };
+  return { record, baseline, candidate, proof: { inputTreeSha256: 'c'.repeat(64),
+    generatorSha256: 'd'.repeat(64), reviewedDiffSha256: 'e'.repeat(64),
+    reproducedOutput: candidate['www/generated/salah-prayer.js'] } };
+}
+test('sole-owner transition is schema-valid but never admits source or grants runtime authority', async () => {
+  const result = await verifyG0({ root: await fixture({ rows: [ownerTransition()] }) });
+  assert.equal(result.authoritative, false);
+  assert.equal(result.authority, 'NONE');
+  assert.equal(result.register.amendments[0].disposition, 'SCHEMA_ONLY_NO_AUTHORITY');
+});
+test('owner transition rejects missing risk acceptance, fake independent review, wrong packet and scope', async () => {
+  for (const [change, pattern] of [
+    [{ securityRiskAccepted: false }, /risk acceptance/],
+    [{ independentReview: 'PASSED' }, /False independent review/],
+    [{ packetSha256: 'f'.repeat(64) }, /approval packet hash/],
+    [{ scopePaths: [...OWNER_PATHS, 'www/quran.js'] }, /path scope/],
+    [{ sourceRecordIds: ['N-01'] }, /hunk scope/],
+    [{ admissionStatus: 'ADMITTED' }, /not source admission/],
+    [{ governanceBaseCommit: 'f'.repeat(40) }, /Unexpected owner governance base/],
+    [{ toPolicyRevision: 3 }, /revised policy revision/]
+  ]) await rejects({ rows: [ownerTransition(change)] }, pattern);
+});
+async function transitionFixture() {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'salah-owner-transition-'));
+  fixtures.push(root);
+  execFileSync('git', ['clone', '-q', '--no-local', sourceRoot, root]);
+  git(root, 'remote', 'set-url', 'origin', 'https://github.com/salahshtech/SALAH-Governance.git');
+  for (const file of ['governance/trust-policy.json', 'governance/approvals.jsonl',
+    'bootstrap/verify.mjs', 'tests/bootstrap-trust.test.mjs'])
+    await writeFile(path.join(root, file), await readFile(path.join(sourceRoot, file)));
+  const registerFile = path.join(root, 'governance/approvals.jsonl');
+  const registerText = await readFile(registerFile, 'utf8');
+  const lines = registerText.trimEnd().split('\n');
+  if (lines.length === 7) {
+    const v2 = JSON.parse(lines[6]);
+    const correction = {
+      kind: 'OWNER_GOVERNANCE_V2_CORRECTION', schemaVersion: 1,
+      decisionId: 'SYNTHETIC-V2-CORRECTION-001', amendmentId: 'SYNTHETIC-V2-CORRECTION',
+      ownerName: 'SH Tech', authority: 'SOLE_PROJECT_OWNER',
+      independentReview: 'UNAVAILABLE_NOT_PERFORMED', securityRiskAccepted: true,
+      riskStatement: 'Synthetic fixture accepts risk without independent security review.',
+      state: 'PROPOSED_CORRECTION', registerRevision: 7,
+      recordedAtUtc: '2026-10-12T15:04:00.000Z',
+      predecessorDecisionId: v2.decisionId,
+      predecessorRecordSha256: sha256(lines[6] + '\n'),
+      priorRegisterPrefixSha256: sha256(registerText),
+      governanceBaseCommit: '7897d3a57d46dd282bb1628fcf83433710f48aff',
+      policyRevision: 2, bootstrapRevision: 3, packetSha256: OWNER_PACKET_SHA,
+      scopePaths: OWNER_PATHS,
+      sourceRecordIds: ['N-01', 'N-02', 'N-03', 'A-01', 'A-02', 'A-03', 'A-04', 'A-05', 'A-06'],
+      finalSha256ByPath: Object.fromEntries(await Promise.all([
+        'governance/trust-policy.json', 'bootstrap/verify.mjs', 'tests/bootstrap-trust.test.mjs'
+      ].map(async file => [file, sha256(await readFile(path.join(sourceRoot, file)))]))),
+      sourceAdmission: false, runtimeAuthority: false, productionAuthorized: false
+    };
+    await writeFile(registerFile, registerText + JSON.stringify(correction) + '\n');
+  }
+  return root;
+}
+test('owner transition binds old/new governance bytes and remains pending while uncommitted', async () => {
+  const root = await transitionFixture();
+  const pending = await verifyOwnerTransition({ root });
+  assert.equal(pending.result, 'OWNER_TRANSITION_PENDING_COMMIT_OR_PACKET');
+  assert.equal(pending.governanceDirty, true);
+  assert.equal(pending.sourceAdmission, false);
+  const wrongPacketDir = await mkdtemp(path.join(os.tmpdir(), 'salah-owner-packet-'));
+  fixtures.push(wrongPacketDir);
+  const wrongPacket = path.join(wrongPacketDir, 'packet.md');
+  await writeFile(wrongPacket, 'not the reviewed packet');
+  await assert.rejects(verifyOwnerTransition({ root, packetPath: wrongPacket }),
+    /Approval packet hash mismatch/);
+  await writeFile(path.join(root, 'bootstrap/verify.mjs'),
+    (await readFile(path.join(root, 'bootstrap/verify.mjs'), 'utf8')) + '\n');
+  await assert.rejects(verifyOwnerTransition({ root }), /Revised governance bytes changed/);
+});
+test('a committed synthetic transition without reviewed packet bytes remains pending', async () => {
+  const root = await transitionFixture();
+  commitFixture(root, 'Synthetic owner transition fixture only');
+  const pending = await verifyOwnerTransition({ root });
+  assert.equal(pending.governanceDirty, false);
+  assert.equal(pending.result, 'OWNER_TRANSITION_PENDING_COMMIT_OR_PACKET');
+});
+const historicalRows = (await readFile(path.join(sourceRoot, 'governance/approvals.jsonl'), 'utf8'))
+  .trimEnd().split('\n').slice(1, 5).map(line => JSON.parse(line));
+const historicalActive = historicalRows[3];
+function ownerRiskRows() {
+  const prefixSha = rows => sha256([header, ...rows].map(row => JSON.stringify(row)).join('\n') + '\n');
+  const transition = ownerTransition({ registerRevision: 5,
+    priorSha256ByPath: { ...ownerTransition().priorSha256ByPath,
+      'governance/approvals.jsonl': prefixSha(historicalRows) } });
+  const successor = { ...structuredClone(transition),
+    kind: 'OWNER_GOVERNANCE_TRANSITION_V2', schemaVersion: 2,
+    decisionId: 'OWNER-H171-GOV-V2', amendmentId: 'OWNER-H171-GOV-V2',
+    registerRevision: 6, supersedesDecisionId: transition.decisionId,
+    priorSha256ByPath: { ...transition.priorSha256ByPath,
+      'governance/approvals.jsonl': prefixSha([...historicalRows, transition]) } };
+  const correction = {
+    kind: 'OWNER_GOVERNANCE_V2_CORRECTION', schemaVersion: 1,
+    decisionId: 'OWNER-H171-CORRECTION-7', amendmentId: 'OWNER-H171-CORRECTION',
+    ownerName: 'SH Tech', authority: 'SOLE_PROJECT_OWNER',
+    independentReview: 'UNAVAILABLE_NOT_PERFORMED', securityRiskAccepted: true,
+    riskStatement: 'SH Tech accepts the risk of no independent security review.',
+    state: 'PROPOSED_CORRECTION', registerRevision: 7,
+    recordedAtUtc: '2026-10-12T15:00:00.000Z',
+    predecessorDecisionId: successor.decisionId,
+    predecessorRecordSha256: sha256(JSON.stringify(successor) + '\n'),
+    priorRegisterPrefixSha256: prefixSha([...historicalRows, transition, successor]),
+    governanceBaseCommit: '7897d3a57d46dd282bb1628fcf83433710f48aff',
+    policyRevision: 2, bootstrapRevision: 3, packetSha256: OWNER_PACKET_SHA,
+    scopePaths: OWNER_PATHS, sourceRecordIds: transition.sourceRecordIds,
+    finalSha256ByPath: Object.fromEntries([
+      'governance/trust-policy.json', 'bootstrap/verify.mjs', 'tests/bootstrap-trust.test.mjs'
+    ].map(file => [file, 'c'.repeat(64)])),
+    sourceAdmission: false, runtimeAuthority: false, productionAuthorized: false
+  };
+  const pin = {
+    kind: 'OWNER_RISK_VERIFIER_PIN', schemaVersion: 1, decisionId: 'TEST-OWNER-PIN-8',
+    amendmentId: 'TEST-OWNER-PIN', ownerName: 'SH Tech', authority: 'SOLE_PROJECT_OWNER',
+    independentReview: 'UNAVAILABLE_NOT_PERFORMED', securityRiskAccepted: true,
+    riskStatement: 'SH Tech accepts the risk of no independent security review.',
+    state: 'DRAFT', registerRevision: 8, decidedAtUtc: '2026-10-12T15:01:00.000Z',
+    approvedAtUtc: null, approvalDecisionId: null, transitionDecisionId: correction.decisionId,
+    supersedesDecisionId: historicalActive.decisionId,
+    previousVerifierSha256: historicalActive.verifierSha256,
+    governanceBaseCommit: '7897d3a57d46dd282bb1628fcf83433710f48aff',
+    governanceRevision: 2, bootstrapRevision: 3, packetSha256: OWNER_PACKET_SHA,
+    scopePaths: OWNER_PATHS, sourceRecordIds: transition.sourceRecordIds,
+    verifierPath: G1_VERIFIER_PATH, verifierSha256: 'f'.repeat(64),
+    mappingVersion: 1, mappingDigest: G1_MAPPING_DIGEST,
+    controlledOnlySha256: G1_HASHES, executionScope: 'SOURCE_VERIFICATION_CLI_ONLY',
+    revokesDecisionId: null, runtimeAuthority: false, productionAuthorized: false
+  };
+  const approved = { ...pin, decisionId: 'TEST-OWNER-PIN-9', state: 'FINAL_BYTES_APPROVED',
+    registerRevision: 9, decidedAtUtc: '2026-10-12T15:02:00.000Z',
+    approvedAtUtc: '2026-10-12T15:02:00.000Z', approvalDecisionId: 'TEST-OWNER-PIN-9' };
+  const active = { ...approved, decisionId: 'TEST-OWNER-PIN-10', state: 'ACTIVE',
+    registerRevision: 10, decidedAtUtc: '2026-10-12T15:03:00.000Z' };
+  return [...structuredClone(historicalRows), transition, successor, correction, pin, approved, active];
+}
+test('historical G1 records remain verifiable with a distinct owner-risk successor sequence', async () => {
+  const rows = ownerRiskRows();
+  const result = await verifyG0({ root: await fixture({ rows }) });
+  assert.equal(result.register.decisions, 10);
+  assert.equal(result.authoritative, false);
+  assert.equal(rows[3].securityReviewStatus, 'PASSED_WITH_NON_BLOCKING_FINDINGS');
+  assert.equal(rows[9].independentReview, 'UNAVAILABLE_NOT_PERFORMED');
+});
+test('non-canonical owner-risk policy fails before transition or verifier evaluation', async () => {
+  const policy = structuredClone(originalPolicy);
+  policy.revisions.register = 0;
+  await rejects({ policyText: JSON.stringify(policy) + '\n' }, /non-canonical JSON/);
+});
+test('V2 correction binds its exact predecessor and both immediate register prefixes', async () => {
+  const base = ownerRiskRows().slice(0, 7);
+  for (const [change, pattern] of [
+    [rows => { rows[5].priorSha256ByPath['governance/approvals.jsonl'] = 'e'.repeat(64); },
+      /Incorrect V2 transition register prefix/],
+    [rows => { rows[6].priorRegisterPrefixSha256 = 'e'.repeat(64); },
+      /Incorrect correction register prefix/],
+    [rows => { rows[6].predecessorRecordSha256 = 'e'.repeat(64); },
+      /Altered predecessor record/],
+    [rows => { rows[6].predecessorDecisionId = 'WRONG'; }, /Wrong correction predecessor/],
+    [rows => { rows[5].decisionId = 'ALTERED-V2'; }, /Wrong correction predecessor/],
+    [rows => { rows[6].packetSha256 = 'e'.repeat(64); }, /Expected values to be strictly equal/],
+    [rows => { rows[6].finalSha256ByPath['bootstrap/verify.mjs'] = 'bad'; },
+      /regular expression/],
+    [rows => { rows[6].state = 'ACTIVE'; }, /Correction cannot activate trust/],
+    [rows => { rows[6].independentReview = 'PASSED'; }, /Expected values to be strictly equal/],
+    [rows => { rows[6].sourceAdmission = true; }, /Expected values to be strictly equal/]
+  ]) {
+    const rows = structuredClone(base);
+    change(rows);
+    await rejects({ rows }, pattern);
+  }
+});
+test('missing, duplicate, reordered and malformed V2 corrections fail closed', async () => {
+  const base = ownerRiskRows().slice(0, 7);
+  const missing = base.slice(0, 6);
+  const missingRoot = await fixture({ rows: missing });
+  await assert.rejects(verifyOwnerTransition({ root: missingRoot }), /Exactly one append-only V2 correction required/);
+  const duplicate = structuredClone(base);
+  duplicate.push({ ...duplicate[6], decisionId: 'SECOND-CORRECTION',
+    amendmentId: 'SECOND-CORRECTION', registerRevision: 8 });
+  await rejects({ rows: duplicate }, /Duplicate V2 correction/);
+  const reordered = structuredClone(base);
+  [reordered[5], reordered[6]] = [reordered[6], reordered[5]];
+  reordered.forEach((row, index) => { row.registerRevision = index + 1; });
+  await rejects({ rows: reordered }, /must immediately follow predecessor/);
+  const malformed = structuredClone(base);
+  delete malformed[6].predecessorRecordSha256;
+  await rejects({ rows: malformed }, /missing\/extra fields/);
+});
+test('canonical but altered policy fails its exact correction hash', async () => {
+  const root = await transitionFixture();
+  const policyFile = path.join(root, 'governance/trust-policy.json');
+  const policy = JSON.parse(await readFile(policyFile, 'utf8'));
+  policy.repository.purpose += ' changed';
+  await writeFile(policyFile, JSON.stringify(policy, null, 2) + '\n');
+  await assert.rejects(verifyOwnerTransition({ root }), /Revised governance bytes changed/);
+});
+test('owner-risk pins reject missing, malformed, duplicate and conflicting records', async () => {
+  const base = ownerRiskRows();
+  for (const [change, pattern] of [
+    [rows => rows.splice(6, 1), /lacks transition/],
+    [rows => { rows[7].verifierSha256 = 'bad'; }, /Invalid successor verifier SHA/],
+    [rows => { rows[8].decisionId = rows[7].decisionId; }, /Duplicate decision ID/],
+    [rows => { rows[9].verifierSha256 = 'e'.repeat(64); }, /identity changed/],
+    [rows => { rows[9].scopePaths = ['www/app.js']; }, /scope changed/],
+    [rows => { rows[9].independentReview = 'PASSED'; }, /Expected values to be strictly equal/],
+    [rows => { rows[9].packetSha256 = 'e'.repeat(64); }, /Wrong transition packet SHA/],
+    [rows => { rows[9].bootstrapRevision = 4; }, /Expected values to be strictly equal/],
+    [rows => { rows[9].state = 'DRAFT'; }, /Invalid owner-risk state transition/],
+    [rows => { rows[7].verifierSha256 = historicalActive.verifierSha256; }, /distinct bytes/]
+  ]) {
+    const rows = structuredClone(base);
+    change(rows);
+    rows.forEach((row, index) => { row.registerRevision = index + 1; });
+    await rejects({ rows }, pattern);
+  }
+});
+test('uncommitted owner-risk successor cannot become active through its own register claim', async () => {
+  const root = await transitionFixture();
+  await assert.rejects(verifyOwnerRiskPin({ root }), /committed, packet-bound trust transition/);
+});
+test('exact hunk projection rejects altered, extra, missing, reordered and duplicate hunks', () => {
+  const baseline = Buffer.from('AA<one>BB<two>CC');
+  const wanted = Buffer.from('AA<ONE>BB<TWO>CC');
+  const hunks = [
+    { id: 'A', prefix: 'AA', old: '<one>', replacement: '<ONE>', suffix: 'BB',
+      oldSha256: sha256('<one>'), replacementSha256: sha256('<ONE>') },
+    { id: 'B', prefix: 'BB', old: '<two>', replacement: '<TWO>', suffix: 'CC',
+      oldSha256: sha256('<two>'), replacementSha256: sha256('<TWO>') }
+  ];
+  assert.equal(verifyFiniteHunkProjection(baseline, wanted, hunks).result, 'EXACT_HUNK_PROJECTION');
+  assert.throws(() => verifyFiniteHunkProjection(baseline, Buffer.from('AA<X>BB<TWO>CC'), hunks), /Extra, missing or altered/);
+  assert.throws(() => verifyFiniteHunkProjection(baseline, baseline, hunks), /Extra, missing or altered/);
+  assert.throws(() => verifyFiniteHunkProjection(baseline, wanted, [...hunks].reverse()), /Reordered/);
+  assert.throws(() => verifyFiniteHunkProjection(baseline, wanted, [hunks[0], hunks[0]]), /Duplicate hunk ID/);
+  assert.throws(() => verifyFiniteHunkProjection(baseline, wanted,
+    [hunks[0], { ...hunks[0], id: 'C' }]), /Duplicate approved hunk anchor/);
+  assert.throws(() => verifyFiniteHunkProjection(Buffer.from('AA<one>BBAA<one>BB'), wanted,
+    [hunks[0]]), /duplicate hunk anchor/);
+  assert.throws(() => verifyFiniteHunkProjection(baseline, wanted,
+    [{ ...hunks[0], replacement: '<BAD>' }, hunks[1]]), /Altered approved replacement/);
+});
+test('owner admission rejects absent transition, wrong packet, scope and generated proof', async () => {
+  const { record, baseline, candidate, proof } = ownerAdmission();
+  await rejects({ rows: [record] }, /lacks prior transition/);
+  const accepted = await verifyG0({ root: await fixture({ rows: [ownerTransition(), record] }) });
+  assert.equal(accepted.authoritative, false);
+  assert.equal(verifyOwnerAdmissionProjection(record, baseline, candidate, proof).result,
+    'EXACT_PROJECTION_ONLY');
+  await rejects({ rows: [ownerTransition(), { ...record, packetSha256: 'f'.repeat(64) }] }, /packet hash/);
+  await rejects({ rows: [ownerTransition(), { ...record, scopePaths: OWNER_PATHS.slice(1) }] }, /path scope/);
+  const wrongIds = structuredClone(record);
+  wrongIds.hunksByPath['www/app.js'][0].id = 'UNRELATED';
+  await rejects({ rows: [ownerTransition(), wrongIds] }, /hunk IDs/);
+  const extraHunk = structuredClone(record);
+  extraHunk.hunksByPath['www/app.js'].push(structuredClone(extraHunk.hunksByPath['www/app.js'][0]));
+  await rejects({ rows: [ownerTransition(), extraHunk] }, /hunk IDs/);
+  assert.throws(() => verifyOwnerAdmissionProjection(record, baseline, candidate,
+    { ...proof, inputTreeSha256: 'f'.repeat(64) }), /generated inputTreeSha256/);
+  assert.throws(() => verifyOwnerAdmissionProjection(record, baseline, candidate,
+    { ...proof, reproducedOutput: Buffer.from('WRONG') }), /Generated output differs/);
+  const extra = { ...candidate, 'www/unrelated.js': Buffer.from('unexpected') };
+  assert.throws(() => verifyOwnerAdmissionProjection(record, baseline, extra, proof), /missing\/extra fields/);
 });
